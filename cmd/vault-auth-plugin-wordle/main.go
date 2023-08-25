@@ -5,11 +5,16 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/sdk/framework"
@@ -18,6 +23,45 @@ import (
 
 	"github.com/hashicorp/vault-auth-plugin-example/version"
 )
+
+type wordle struct {
+	mu sync.Mutex
+
+	date   string
+	answer string
+}
+
+type answer struct {
+	Solution string `json:"solution"`
+}
+
+func fetchAnswer(date string) (string, error) {
+	var ans answer
+	res, err := http.Get(fmt.Sprintf("https://www.nytimes.com/svc/wordle/v2/%s.json", date))
+	if err != nil {
+		return "", err
+	}
+	err = json.NewDecoder(res.Body).Decode(&ans)
+	if err != nil {
+		return "", err
+	}
+	return ans.Solution, nil
+}
+
+func (w *wordle) Answer() (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	date := time.Now().Format("2006-01-02")
+	if w.date != date {
+		ans, err := fetchAnswer(date)
+		if err != nil {
+			return "", err
+		}
+		w.date = date
+		w.answer = ans
+	}
+	return w.answer, nil
+}
 
 func main() {
 	apiClientMeta := &api.PluginAPIClientMeta{}
@@ -50,6 +94,7 @@ func Factory(ctx context.Context, c *logical.BackendConfig) (logical.Backend, er
 
 type backend struct {
 	*framework.Backend
+	wordle wordle
 }
 
 func Backend(c *logical.BackendConfig) *backend {
@@ -65,7 +110,7 @@ func Backend(c *logical.BackendConfig) *backend {
 			{
 				Pattern: "login",
 				Fields: map[string]*framework.FieldSchema{
-					"password": {
+					"wordle": {
 						Type: framework.TypeString,
 					},
 				},
@@ -81,12 +126,14 @@ func Backend(c *logical.BackendConfig) *backend {
 }
 
 func (b *backend) pathAuthLogin(_ context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	password := d.Get("password").(string)
-
-	if subtle.ConstantTimeCompare([]byte(password), []byte("super-secret-password")) != 1 {
+	password := strings.TrimSpace(d.Get("wordle").(string))
+	answer, err := b.wordle.Answer()
+	if err != nil {
+		return nil, err
+	}
+	if len(password) != 5 || password != answer {
 		return nil, logical.ErrPermissionDenied
 	}
-
 	// Compose the response
 	return &logical.Response{
 		Auth: &logical.Auth{

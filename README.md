@@ -21,7 +21,7 @@ GitHub. Alternatively you can compile the plugin from source.
 1. Move the compiled plugin into Vault's configured `plugin_directory`:
 
     ```sh
-    $ mv vault-auth-plugin-example /etc/vault/plugins/vault-auth-plugin-example
+    $ mv vault-auth-plugin-wordle /etc/vault/plugins/vault-auth-plugin-wordle
     ```
 
 1. Calculate the SHA256 of the plugin and register it in Vault's plugin catalog.
